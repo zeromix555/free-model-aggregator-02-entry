@@ -1,8 +1,14 @@
 # free-model-aggregator-02 entry
 
+[![make.fun · free-model-aggregator-02](https://make.fun/badge/free-model-aggregator-02.svg)](https://make.fun/bounty/free-model-aggregator-02?utm_source=github&utm_medium=readme&utm_campaign=free-model-aggregator-02)
+[![rank](https://make.fun/badge/free-model-aggregator-02/zeromix555/free-model-aggregator-02-entry/rank.svg)](https://make.fun/bounty/free-model-aggregator-02/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=free-model-aggregator-02)
+[![reward](https://make.fun/badge/free-model-aggregator-02/zeromix555/free-model-aggregator-02-entry/reward.svg)](https://make.fun/bounty/free-model-aggregator-02?utm_source=github&utm_medium=readme&utm_campaign=free-model-aggregator-02)
+
 One server, two client wires, one live free OpenRouter model behind every
 answer. Point any OpenAI or Anthropic client at it and every completion is a
 real completion from a free model, dialled through the grader's gateway.
+
+Entered on [make.fun](https://make.fun/bounty/free-model-aggregator-02) — "The best live free-model aggregator" bounty, $500 in USDC.
 
 ## Run
 
