@@ -14,9 +14,9 @@
 //   best JSON-capable 1303: openrouter/nvidia/nemotron-3.5-super-vl:free
 //     (tools true, vision true, json true)
 // So JSON-mode prompts ride the 1303 model; every other prompt rides the
-// 1475 model. Failover walks the rating order within the prompt's
-// requirements, skipping a model that already refused in this trial unless
-// nothing else is left. Quality ceiling on this shape is 100: the best model
+// 1475 model. Failover retries a refused model once, then walks the rating
+// order within the prompt's requirements, skipping a model that refused twice
+// in this trial unless nothing else is left. Quality ceiling on this shape is 100: the best model
 // for every prompt's requirements is reachable (no per-provider budget caps
 // exist in -02, unlike -01).
 //
@@ -296,8 +296,8 @@ const brief = readBrief(PROMPT_FILE);
 const catalog: CatalogReport = buildCatalog(brief);
 /** Which prompt row the request now arriving is: the brief's prompts are in the client's arrival order. */
 let manifestIndex = 0;
-/** Models that refused a gateway call in this trial: skipped on later prompts unless nothing else is left. */
-const refusedModels = new Set<string>();
+/** Models that refused a gateway call in this trial, and how often: a model is skipped once it has refused twice. */
+const refusedModels = new Map<string, number>();
 
 function log(message: string): void {
   process.stderr.write(`aggregator: ${message}\n`);
@@ -889,18 +889,19 @@ function failureCodeOf(text: string, status: number): string {
 }
 
 /**
- * Dial the gateway's Chat Completions route for one request, failing over in rating order. A model
- * that refused earlier in this trial is skipped unless it is the only candidate left, so one
- * rate-limited model never takes every later prompt down with it. Returns the first 2xx answer with
- * the refusals it took to get there; every refusal is recorded in this trial's set and in the returned
- * trail, which the response carries as `x-makefun-upstream-failures` — the only way the failover
- * column can see a refusal this server retried and then served.
+ * Dial the gateway's Chat Completions route for one request, failing over in rating order. A refused
+ * model is retried once on the spot — a single 429 is often transient, and a retry that succeeds
+ * keeps the prompt on the best model — and skipped on later prompts once it has refused twice in
+ * this trial, so one rate-limited model never takes every later prompt down with it. Returns the
+ * first 2xx answer with the refusals it took to get there; every refusal is recorded in this trial's
+ * counts and in the returned trail, which the response carries as `x-makefun-upstream-failures` —
+ * the only way the failover column can see a refusal this server retried and then served.
  */
 async function dial(candidates: ModelRow[], body: Json): Promise<DialResult | null> {
-  const fresh = candidates.filter((m) => !refusedModels.has(m.id));
+  const fresh = candidates.filter((m) => (refusedModels.get(m.id) ?? 0) < 2);
   const order = fresh.length > 0 ? fresh : candidates;
   const failures: UpstreamFailure[] = [];
-  for (const model of order) {
+  const attempt = async (model: ModelRow): Promise<Response | null> => {
     let upstream: Response;
     try {
       upstream = await fetch(chatCompletionsUrl(), {
@@ -914,16 +915,27 @@ async function dial(candidates: ModelRow[], body: Json): Promise<DialResult | nu
         signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
       });
     } catch (err) {
-      refusedModels.add(model.id);
+      refusedModels.set(model.id, (refusedModels.get(model.id) ?? 0) + 1);
       failures.push({ status: 502, code: 'upstream_unreachable', model: model.id });
       log(`gateway unreachable for ${model.id}: ${(err as Error).message}`);
-      continue;
+      return null;
     }
-    if (upstream.ok && upstream.body !== null) return { response: upstream, model: model.id, failures };
+    if (upstream.ok && upstream.body !== null) return upstream;
     const text = await upstream.text().catch(() => '');
-    refusedModels.add(model.id);
+    refusedModels.set(model.id, (refusedModels.get(model.id) ?? 0) + 1);
     failures.push({ status: upstream.status, code: failureCodeOf(text, upstream.status), model: model.id });
     log(`gateway refused ${model.id} with HTTP ${upstream.status}`);
+    return null;
+  };
+  for (const model of order) {
+    const first = await attempt(model);
+    if (first !== null) return { response: first, model: model.id, failures };
+    // One immediate retry of the same model: a single refusal is often transient, and a retry that
+    // succeeds keeps the prompt on the best model. A second refusal moves on to the next candidate.
+    if ((refusedModels.get(model.id) ?? 0) === 1) {
+      const retry = await attempt(model);
+      if (retry !== null) return { response: retry, model: model.id, failures };
+    }
   }
   return failures.length > 0 ? { response: null as unknown as Response, model: '', failures } : null;
 }

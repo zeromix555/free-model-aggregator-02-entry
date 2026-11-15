@@ -25,8 +25,9 @@ dials the best:
   `openrouter/thinkingmachines/inkling-2-small:free` (rating 1475, the best
   free model overall).
 
-On any refusal (429, 5xx, unreachable) it fails over to the next-best model
-that meets the prompt, skipping models that already refused in this trial,
+On any refusal (429, 5xx, unreachable) it retries the same model once — a
+single refusal is often transient — then fails over to the next-best model
+that meets the prompt, skipping models that refused twice in this trial.
 and reports the refusals it recovered from in the
 `x-makefun-upstream-failures` header so the failover column can see them.
 Exactly one successful gateway call answers each request.
