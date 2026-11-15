@@ -28,6 +28,10 @@ dials the best:
 On any refusal (429, 5xx, unreachable) it retries the same model once — a
 single refusal is often transient — then fails over to the next-best model
 that meets the prompt, skipping models that refused twice in this trial.
+An answer only counts when it carries the prompt's token: a 200 whose text
+never names the token is treated as a failure and the next model is tried,
+on JSON and on streams alike. Exactly one successful gateway call answers
+each request.
 and reports the refusals it recovered from in the
 `x-makefun-upstream-failures` header so the failover column can see them.
 Exactly one successful gateway call answers each request.
